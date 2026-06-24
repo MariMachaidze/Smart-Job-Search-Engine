@@ -1,0 +1,23 @@
+services:
+  app:
+    build: ./app
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/data
+      - ./input:/input
+    env_file:
+      - .env
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./app
+          target: /app
+
+  scraper:
+    build: ./scraper
+    volumes:
+      - ./data:/data
+      - ./input:/input
+    env_file:
+      - .env
