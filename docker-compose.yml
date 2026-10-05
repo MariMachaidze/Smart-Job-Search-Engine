@@ -1,6 +1,12 @@
 services:
   app:
-    build: ./app
+    # Build context is the repo root (not ./app): app/main.py imports sibling
+    # top-level packages directly, so the image needs the whole tree, not
+    # just app/. See app/Dockerfile and the identical reasoning in
+    # orchestrator/Dockerfile for the scheduler service.
+    build:
+      context: .
+      dockerfile: app/Dockerfile
     ports:
       - "5000:5000"
     volumes:
@@ -8,11 +14,16 @@ services:
       - ./input:/input
     env_file:
       - .env
+    environment:
+      # storage/paths.py resolves the data dir relative to wherever it sits
+      # on disk; this image's WORKDIR is /code, not the host's repo root, so
+      # pin it explicitly to match the ./data:/data volume mount above.
+      - DATA_DIR=/data
     develop:
       watch:
         - action: sync+restart
-          path: ./app
-          target: /app
+          path: .
+          target: /code
 
   scraper:
     build: ./scraper
@@ -21,3 +32,24 @@ services:
       - ./input:/input
     env_file:
       - .env
+
+  scheduler:
+    # Build context is the repo root (not ./orchestrator): scheduled_jobs.py
+    # imports sibling top-level packages (storage, qualifications,
+    # notifications, and transitively rag/stats/tracker/app.llm) directly, so
+    # the image needs the whole tree, not just orchestrator/. See
+    # orchestrator/Dockerfile.
+    build:
+      context: .
+      dockerfile: orchestrator/Dockerfile
+    volumes:
+      - ./data:/data
+      - ./input:/input
+    env_file:
+      - .env
+    environment:
+      # storage/paths.py resolves the data dir relative to wherever it sits
+      # on disk (repo-root-relative by default); the orchestrator image's
+      # WORKDIR is /code, not the host's repo root, so pin it explicitly to
+      # match the ./data:/data volume mount above.
+      - DATA_DIR=/data
