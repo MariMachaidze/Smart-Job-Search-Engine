@@ -1,55 +1,50 @@
 # Smart Job Search Engine
 
-A personal AI-powered job hunting CRM that automatically scrapes company careers pages, learns your preferences from your feedback, and helps you manage your entire application process — from discovery to offer.
+A multi-user, chat-driven AI system that hunts for jobs on your behalf: it finds new postings every day, scores them against your resume, drafts a tailored resume and cover letter on request, and tracks every application through to an offer — all from one chat window or a ranked job feed.
 
-> Built in public, one phase at a time. Follow the build log below to see progress.
+> Built in public, one phase at a time. See [Evolution](#evolution) for a running visual log and [Build Status](#build-status) for what's actually working right now.
 
 ---
 
 ## The Problem
 
-Job hunting is tedious. You manually visit dozens of careers pages, copy-paste job descriptions, try to remember which CV you sent where, and lose track of who you've contacted for referrals. Most job boards show you irrelevant roles and there's no easy way to track everything in one place.
+Job hunting is tedious. You manually visit dozens of careers pages, copy-paste job descriptions, try to remember which resume you sent where, and lose track of who you've contacted for referrals. Most job boards show you irrelevant roles and there's no easy way to track everything in one place.
 
 ## The Solution
 
-An intelligent local web app that does the heavy lifting:
-- Automatically finds and scrapes job listings from any company's careers page
-- Learns what kinds of roles you actually want based on your feedback
-- Tells you which CV to use for each role and exactly how to tailor it
-- Tracks every application, referral, and interview stage in one place
-- Gets smarter every time you use it
+An AI agent system that does the heavy lifting:
+- Checks your chosen companies' career pages automatically, every day, via their ATS APIs (Greenhouse/Lever) with a Playwright scraper fallback for everything else
+- Scores every posting against your resume, excluding ones that fail your commute/remote preferences before they ever cost an LLM call
+- Generates a tailored resume and cover letter per job on request, never fabricating experience that isn't in your real profile
+- Tracks every application through a fully custom status pipeline, with full history so nothing gets lost when a status changes
+- Learns from your feedback over time — rejections, reasons, and generated documents all feed back into a daily-refreshed "qualifications" summary, so matching actually improves the more you use it
+- Emails you a reminder if you've liked a job but haven't applied yet
+
+The primary interface is a chatbot — ask it to search, rate a job, tailor a resume, update your tracker, or explain why you keep getting rejected, and it calls the right tool itself.
 
 ---
 
-## Features
+## Architecture
 
-### Intelligent Scraping
-- Provide a list of company names. The agent finds their careers pages automatically
-- Handles pagination, infinite scroll, and varied page structures
-- Polite crawling with request delays to avoid rate limiting
+```
+React SPA (Netlify)                 FastAPI backend                     Data (per-user JSON + S3)
+┌───────────────────┐   JWT auth   ┌────────────────────────┐          ┌─────────────────────────┐
+│ Welcome             │────────────▶│ app/auth.py (+ 2FA)     │         │ storage/* — schemas,      │
+│ Profile (5 tabs)    │◀──REST/SSE─▶│ chat/, tracker/ routers │────────▶│ JSON persistence, S3       │
+│ Chat (+ sessions)   │             │ app/routes_*.py          │        │ files (resumes, docs)      │
+│ Job Search          │             └───────────┬──────────────┘       └─────────────────────────┘
+└───────────────────┘                           │ invokes
+                                  ┌───────────────┼────────────────┬──────────────────┐
+                                  ▼               ▼                ▼                  ▼
+                        discovery_graph   tailoring_graph      chat_graph      qualifications/
+                        (LangGraph)       (LangGraph)          (Gemini tool-   updater.py
+                         ATS API/scraper   tailor + cover       calling loop    (self-improving
+                         → geocode/filter  letter, parallel     over every      matching prompt,
+                         → match scoring   fan-out               service)       folds in RAG +
+                                                                                 rejection signal)
+```
 
-### Preference Learning
-- No keywords to configure, just rate jobs as Relevant or Not Relevant
-- AI analyses your ratings and builds a preference profile in plain language
-- You can review, edit, and correct the profile before each new scan
-- Gets more accurate over time as you provide more feedback
-
-### CV Analysis (On Demand)
-- multiple CVs supported (e.g. robotics-focused and AI/ML-focused)
-- For each relevant job: recommends which CV to use and why
-- Lists specific missing skills and high-level gaps
-- Never modifies your actual CV files, only gives advice
-
-### Application Tracking
-- Track every job through: Saved → Applied → Interviewing → Rejected / Offer
-- Log why you applied, referral status, and personal notes per job
-- Change tracking between scans: New / Closed jobs flagged automatically
-
-### Analytics
-- Per-run and daily statistics
-- Application funnel visualisation
-- Company breakdown — who posts the most relevant roles
-- Preference accuracy tracking over time
+A background scheduler (APScheduler) runs the qualifications refresh, discovery, and email digest on a daily cron, independent of anything triggered live through chat.
 
 ---
 
@@ -58,12 +53,19 @@ An intelligent local web app that does the heavy lifting:
 | Layer | Technology |
 |---|---|
 | Backend | Python, FastAPI |
-| Frontend | Jinja2, Tailwind CSS, HTMX |
-| Database | SQLite + aiosqlite |
-| Scraping | Playwright (headless Chromium) |
-| Search | Brave Search API |
-| AI | Anthropic Claude API |
-| Infrastructure | Docker, Docker Compose |
+| Frontend | React, TypeScript, Vite |
+| Orchestration | LangGraph (discovery, tailoring, and chat tool-calling graphs) |
+| LLM | Google Gemini 2.5 Flash |
+| Persistence | Per-user JSON files (SQLite migration planned later) |
+| File storage | AWS S3 (resumes, generated documents) |
+| Auth | JWT + TOTP two-factor authentication |
+| Job discovery | Greenhouse/Lever ATS APIs, Playwright scraper fallback |
+| Geocoding | OpenStreetMap Nominatim (commute/remote filtering) |
+| Email | Resend (daily digest) |
+| Scheduling | APScheduler |
+| Frontend hosting | Netlify |
+| Backend hosting | Not yet deployed — Hetzner VPS (EU region) recommended, see `docs/backend_hosting.md` |
+| Retrieval (RAG) | In progress — custom-built by the project owner, see `rag/` |
 
 ---
 
@@ -71,22 +73,24 @@ An intelligent local web app that does the heavy lifting:
 
 ```
 Smart-Job-Search-Engine/
-├── app/                        # FastAPI web application
-│   ├── main.py                 # App entry point
-│   ├── templates/              # Jinja2 HTML templates
-│   ├── static/                 # CSS and JS assets
-│   └── Dockerfile
-├── scraper/                    # Playwright scraper service
-│   └── Dockerfile
-├── data/                       # SQLite database (not committed)
-├── input/                      # Your input files (not committed)
-│   ├── companies.csv           # List of companies to scan
-│   └── cvs/
-│       ├── cv_robotics.txt     # Robotics-focused CV
-│       └── cv_ai.txt           # AI/ML-focused CV
+├── app/                   # FastAPI entrypoint, auth (+2FA), profile/companies/jobs/documents/statistics routes
+├── chat/                  # Chat session REST/SSE routes
+├── orchestrator/          # LangGraph graphs (discovery, tailoring, chat), scheduler
+├── scraper/                # ATS API clients (Greenhouse/Lever), Playwright fallback, discovery pipeline
+├── geocoding/              # Commute-distance / remote-preference hard filter
+├── resume/                 # PDF parsing, resume + cover letter generation (python-docx)
+├── matching/                # Job ↔ profile scoring
+├── tracker/                 # Application tracker (custom statuses, full status history)
+├── stats/                   # Statistics + skill-gap analysis
+├── qualifications/           # Self-improving matching-prompt synthesis
+├── notifications/            # Email digest
+├── rag/                     # Retrieval over profile + past documents — in progress, hand-built
+├── storage/                  # Shared schemas + JSON persistence + S3 client (the single source of truth)
+├── frontend/                 # React + Vite SPA (Welcome, Profile, Chat, Job Search)
+├── docs/                    # Research docs (hosting, embeddings, EU job sources) + screenshots
+├── data/                    # Per-user JSON data (gitignored)
 ├── docker-compose.yml
-├── .env.example
-└── README.md
+└── .env.example
 ```
 
 ---
@@ -94,108 +98,109 @@ Smart-Job-Search-Engine/
 ## Getting Started
 
 ### Prerequisites
-- [Docker Desktop](https://www.docker.com/products/docker-desktop)
-- [Git](https://git-scm.com)
+- Python 3.11+, Node 20+
+- [Docker](https://www.docker.com/) (optional, for the full compose stack)
+- A Google Gemini API key
 
-### 1. Clone the repo
+### 1. Clone and configure
 ```bash
-git clone https://github.com/YOUR_USERNAME/Smart-Job-Search-Engine.git
+git clone https://github.com/MariMachaidze/Smart-Job-Search-Engine.git
 cd Smart-Job-Search-Engine
-```
-
-### 2. Set up environment variables
-```bash
 cp .env.example .env
 ```
-Open `.env` and fill in your API keys:
-- `ANTHROPIC_API_KEY` — from [console.anthropic.com](https://console.anthropic.com)
-- `BRAVE_API_KEY` — from [brave.com/search/api](https://brave.com/search/api)
+Fill in `.env` — see [Environment Variables](#environment-variables) below.
 
-### 3. Add your input files
-Create `input/companies.csv`:
-```csv
-company
-Anthropic
-DeepMind
-Boston Dynamics
+### 2. Backend
+```bash
+cd app && pip install -r requirements.txt
+uvicorn app.main:app --reload --port 5000
 ```
 
-Add your CVs as plain text files:
+### 3. Frontend
+```bash
+cd frontend && npm install
+npm run dev
 ```
-input/cvs/cv_robotics.txt
-input/cvs/cv_ai.txt
-```
+Without `VITE_API_BASE_URL` set, the frontend runs against mocked API responses automatically — useful for UI work without a live backend.
 
-### 4. Run
+### 4. Or, the full stack via Docker
 ```bash
 docker compose watch
 ```
-
-Open [http://localhost:5000](http://localhost:5000)
 
 ---
 
 ## Environment Variables
 
-See `.env.example` for all required variables:
-
-| Variable | Where to get it |
+| Variable | Purpose |
 |---|---|
-| `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) |
-| `BRAVE_API_KEY` | [brave.com/search/api](https://brave.com/search/api) |
+| `GEMINI_API_KEY` | Google Gemini API key — every LLM call in the system |
+| `JWT_SECRET` | Signs auth tokens — generate with `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET_NAME` | Resume/document file storage |
+| `RESEND_API_KEY`, `DIGEST_FROM_EMAIL` | Daily "jobs you liked but haven't applied to" email |
+| `VITE_API_BASE_URL` (frontend) | Real backend URL — unset defaults the frontend to mocked data |
 
 ---
 
 ## How It Works
 
 ```
-companies.csv
+Your companies list
     │
     ▼
-Brave Search API ──► finds careers page URL per company
+discovery_graph ──► ATS API (Greenhouse/Lever) or Playwright scraper fallback
     │
     ▼
-Playwright ──► scrapes all job listings (handles pagination + scroll)
+Geocode + hard filter ──► excludes jobs failing your commute/remote preferences
     │
     ▼
-Rating Queue ──► you rate each job: Relevant / Not Relevant
+Score against your profile ──► uses the daily-refreshed qualifications summary once one exists
     │
     ▼
-Preference Profile ──► AI learns what you want, you review + confirm
+Chat or Job Search page ──► you rate relevant/not-relevant (with a reason), or request tailoring
     │
     ▼
-Next Scan ──► filtered automatically by your preferences
+tailoring_graph ──► tailored resume + cover letter, generated in parallel, never fabricated
     │
     ▼
-Relevant Jobs ──► CV analysis, application tracking, change detection
+Tracker ──► full application history, custom statuses
+    │
+    ▼
+Statistics + skill-gap analysis ──► feeds back into tomorrow's qualifications refresh
 ```
 
 ---
 
-## Build Log
+## Evolution
 
-| Phase | Description | Status |
-|---|---|---|
-| 0 | Project skeleton — Docker, FastAPI, GitHub | ✅ Done |
-| 1 | Brave Search — company name → careers URL | ⬜ |
-| 2 | Playwright scraper — careers URL → job list | ⬜ |
-| 3 | Job detail extractor — job URL → structured data | ⬜ |
-| 4 | Database layer — full SQLite schema + helpers | ⬜ |
-| 5 | UI shell — all pages with fake data | ⬜ |
-| 6 | Scraping + UI connected with live progress | ⬜ |
-| 7 | Rating queue with real scraped data | ⬜ |
-| 8 | Preference learning — AI profile generation | ⬜ |
-| 9 | CV analysis — on-demand per relevant job | ⬜ |
-| 10 | Change tracking — new / closed job detection | ⬜ |
-| 11 | Analytics — stats, funnel, trends | ⬜ |
-| 12 | Smart filtering — preference-based scrape filter | ⬜ |
+A running visual log of how the app actually looks as it's built — add a new dated entry here each time the UI takes a meaningful step forward.
+
+### 2026-10-10 — Welcome page live on Netlify
+![Welcome page, 2026-10-10](docs/screenshots/2026-10-10-welcome-page.png)
 
 ---
 
+## Build Status
+
+Built as 18 parallel workstreams, each independently live-tested as it landed (real API calls, real file I/O, real test suites — not just "looks done").
+
+| Area | Status |
+|---|---|
+| Storage layer, auth + 2FA, job discovery, geocoding filter | ✅ Done, live-tested |
+| Resume parsing, matching/scoring, document generation | ✅ Done, live-tested |
+| Application tracker (+ status history), statistics + skill-gap | ✅ Done, live-tested |
+| Qualifications updater, email digest, both LangGraph graphs, scheduler | ✅ Done, live-tested |
+| API backend, chat orchestrator | ✅ Built — final wiring/live verification in progress |
+| React frontend | ✅ Built, tests passing, deployed to Netlify — backend connection pending |
+| RAG (`rag/`) | 🚧 In progress — hand-built by the project owner, see plan section 6a |
+| Backend deployment | ⬜ Not yet deployed — frontend currently runs against mocked data |
+
+See `docs/` for research backing specific decisions: `backend_hosting.md`, `embedding_options.md`, `eu_job_sources.md`.
+
 ## Roadmap (Post-MVP)
 
-- [ ] Cloud deployment for always-on access
-- [ ] Kubernetes migration (learning exercise)
-- [ ] Email/browser notifications for new relevant jobs
-- [ ] Export to CSV / PDF
-- [ ] Mobile-friendly UI
+- [ ] Deploy backend (Hetzner VPS, EU region)
+- [ ] Finish RAG implementation
+- [ ] Additional job sources (Bundesagentur für Arbeit, Arbeitnow — see `docs/eu_job_sources.md`)
+- [ ] SQLite migration once JSON-file persistence stops scaling
+- [ ] Mobile-friendly frontend pass

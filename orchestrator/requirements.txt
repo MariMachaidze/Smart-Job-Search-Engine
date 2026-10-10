@@ -3,3 +3,9 @@ playwright
 apscheduler
 google-genai
 python-dotenv
+boto3             # storage/s3_client.py, hit via tailoring_graph
+filelock          # storage/json_store.py (concurrency-safe writes)
+pdfplumber        # resume/parser.py
+python-docx       # resume/tailor.py, resume/cover_letter.py
+beautifulsoup4    # scraper/ats_client.py, geocoding/client.py
+httpx             # scraper/ats_client.py, geocoding/client.py, notifications/email.py

@@ -9,4 +9,9 @@ python-jose[cryptography]
 pyotp
 python-multipart  # required by FastAPI's UploadFile/Form parsing (POST /profile/upload)
 langgraph         # app/routes_jobs.py invokes orchestrator.discovery_graph / tailoring_graph
-boto3             # app/routes_documents.py calls storage.s3_client.get_presigned_url
+boto3             # storage/s3_client.py
+filelock          # storage/json_store.py (concurrency-safe writes)
+pdfplumber        # resume/parser.py (PDF -> text, POST /profile/upload)
+python-docx       # resume/tailor.py, resume/cover_letter.py (.docx generation)
+beautifulsoup4    # scraper/ats_client.py, geocoding/client.py
+httpx             # scraper/ats_client.py, geocoding/client.py, notifications/email.py

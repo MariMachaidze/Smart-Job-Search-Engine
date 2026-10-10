@@ -1,0 +1,13 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Client-side routing (react-router): without this, refreshing or
+# deep-linking into any route other than "/" (e.g. /chat, /profile) 404s,
+# because Netlify otherwise looks for a matching file/folder on disk for
+# every path instead of always serving the SPA shell and letting the router
+# handle it.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

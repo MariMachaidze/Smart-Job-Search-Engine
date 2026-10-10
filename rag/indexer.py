@@ -9,6 +9,8 @@ the bodies below with the real implementation — do not change the signatures
 without updating the plan and the callers.
 """
 from typing import Any
+import hashlib
+from datetime import datetime, timezone
 
 
 def _experience_entry_to_chunk(entry: dict) -> str:
@@ -46,10 +48,32 @@ def _skill_to_chunk(skill: str) -> str:
 def index_profile(user_id: str, profile: dict) -> None:
     """No-op until implemented. Should chunk profile experience/skill entries,
     embed them, and persist as DocumentChunk records for this user."""
-    return None
+
+    chunks = []
+
+    for entry in profile["experience"]:
+        # chunks.append({"source_type": "experience", "text": _experience_entry_to_chunk(entry)})
+        chunks.append(_build_chunk_record(user_id, "experience", profile["profile_id"], _experience_entry_to_chunk(entry)))
+    for skill in profile["skills"]:
+        chunks.append({"source_type": "skill", "text": _skill_to_chunk(skill)})
+
 
 
 def index_generated_document(user_id: str, document: dict, doc_text: str) -> None:
     """No-op until implemented. Should chunk the generated resume/cover-letter
     text, embed it, and persist as DocumentChunk records for this user."""
     return None
+
+def _build_chunk_record(user_id, source_type, source_id, text) -> dict:
+    chunk_id = hashlib.sha256(f"{user_id}:{source_id}:{text}".encode()).hexdigest()[:16]
+    embedding = []
+    created_at = datetime.now(timezone.utc).isoformat()
+    return  {
+                    "chunk_id": chunk_id,
+                    "user_id": user_id,
+                    "source_type": source_type,
+                    "source_id": source_id,
+                    "text": text,
+                    "embedding": embedding,
+                    "created_at": created_at,
+            }
